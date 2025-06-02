@@ -1,62 +1,62 @@
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
-from typing import Optional
-import datetime
+from fastapi import FastAPI, Request, HTTPException
 
 app = FastAPI()
 
-class Signal(BaseModel):
-    symbol: str
-    profit: float
-    side: str  # "buy" or "sell"
+API_TOKEN = "MARS-4X7gVp9NzKLwT0C"
 
-class Settings(BaseModel):
-    trail: Optional[float] = 0.5
-    rocket_mode: Optional[bool] = False
-    save_ratio: Optional[float] = 0.5
-    currency: Optional[str] = "USDT"
-
-state = {
-    "mode": "normal",
-    "last_profit": 0.0,
-    "rocket": False,
-    "settings": {
-        "trail": 0.5,
-        "rocket_mode": False,
-        "save_ratio": 0.5,
-        "currency": "USDT"
-    },
-    "log": []
+STATE = {
+    "rocket_mode": False,
+    "profit": 0,
+    "copied": 0,
+    "last_signal": "none",
+    "config": {
+        "copy_percent": 50,
+        "limit_usdt": 100,
+        "active": True
+    }
 }
 
-@app.post("/signal")
-def receive_signal(signal: Signal):
-    saved = signal.profit * state["settings"]["save_ratio"]
-    reinvest = signal.profit - saved
-    state["last_profit"] = signal.profit
-    state["log"].append({
-        "time": str(datetime.datetime.now()),
-        "action": f"Received {signal.side} for {signal.symbol}",
-        "profit": signal.profit,
-        "saved": saved,
-        "reinvest": reinvest
-    })
-    return {"status": "ok", "saved": saved, "reinvest": reinvest}
+def authorize(request: Request):
+    token = request.query_params.get("token")
+    if token != API_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid token")
 
-@app.post("/update-settings")
-def update_settings(settings: Settings):
-    state["settings"].update(settings.dict(exclude_unset=True))
-    return {"status": "updated", "settings": state["settings"]}
+@app.get("/")
+def root():
+    return {"Hello": "World"}
 
 @app.get("/status")
-def get_status():
-    return state
+def status(request: Request):
+    authorize(request)
+    return {
+        "rocket_mode": STATE["rocket_mode"],
+        "profit": STATE["profit"],
+        "copied": STATE["copied"],
+        "last_signal": STATE["last_signal"],
+        "config": STATE["config"]
+    }
 
-@app.get("/mode")
-def get_mode():
-    return {"mode": "🚀 rocket" if state["rocket"] else "⚙️ normal"}
+@app.get("/signal")
+def signal(request: Request, action: str = ""):
+    authorize(request)
+    STATE["last_signal"] = action
+    return {"received_signal": action}
 
-@app.post("/toggle-rocket")
-def toggle_rocket():
-    state["rocket"] = not state["rocket"]
-    return {"rocket": state["rocket"]}
+@app.get("/rocket")
+def rocket(request: Request):
+    authorize(request)
+    STATE["rocket_mode"] = True
+    return {"rocket_mode": "activated"}
+
+@app.get("/save")
+def save(request: Request):
+    authorize(request)
+    saved = int(STATE["profit"] * STATE["config"]["copy_percent"] / 100)
+    STATE["copied"] += saved
+    STATE["profit"] -= saved
+    return {"saved": saved, "remaining": STATE["profit"]}
+
+@app.get("/config")
+def get_config(request: Request):
+    authorize(request)
+    return STATE["config"]
